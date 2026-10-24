@@ -1,56 +1,81 @@
 # Windows Gateway ARP Pin
 
-Suggested repository name: `windows-gateway-arp-pin`.
+Windows utility for a specific network failure: a local gateway IP address is advertised by more than one device, so Windows keeps changing the gateway's ARP/MAC mapping. The result can be brief Internet stalls, packet loss, game disconnects, or web pages that only recover after a reload.
 
-This small Windows utility pins a local IPv4 gateway address to a verified MAC address on one network interface. It is intended for a narrow problem: intermittent Internet stalls, game disconnects, packet loss, or short freezes caused by two devices claiming the same gateway IP address.
+This tool creates a permanent neighbor entry on **one Windows computer and one network adapter**. It is a local workaround while the network owner investigates the duplicate gateway. It does not repair the router, access point, Wi-Fi extender, ISP, or the wider network.
 
-It is useful when diagnostics show symptoms such as:
+## Download
 
-- `192.168.1.1` sometimes resolving to different MAC addresses.
-- An ARP entry changing between two gateway MAC addresses.
-- A Wi-Fi extender or repeater forwarding a duplicate-gateway conflict.
-- Web pages hanging briefly and loading immediately after reload.
-- Online games disconnecting even though signal strength and download speed look good.
-- Stable pings to the local extender but intermittent loss when reaching the gateway or Internet.
+Download the latest Windows x64 release from [GitHub Releases](https://github.com/ventriquo/windows-gateway-arp-pin/releases/latest). The release includes:
 
-This is a laptop-only workaround. It does not repair the dormitory, apartment, office, ISP, router, access point, or Wi-Fi extender network. The proper network fix is for the network administrator to find the second device using the gateway IP and correct its addressing or routing mode.
+- `WindowsGatewayArpPin.exe`, a self-contained executable.
+- A ZIP bundle containing the executable, this README, the incident guide, and the MIT license.
 
-## What the app does
+Run the executable as administrator. Windows may display an elevation prompt because changing a neighbor entry requires administrator permission.
 
-The app requires administrator permission and performs the equivalent of these Windows commands:
+## When this helps
+
+Use this utility when local diagnostics support a duplicate gateway or ARP-flapping problem. Typical symptoms include:
+
+- Online games disconnect or stop receiving updates for a fraction of a second.
+- A web page hangs briefly but loads immediately after pressing reload.
+- Download speed is high, while real-time applications still freeze.
+- A Wi-Fi extender or repeater is reachable, but the upstream gateway is intermittent.
+- The same gateway IP appears with different MAC addresses over time.
+
+The tool is not a general Wi-Fi booster. It will not fix weak signal, channel congestion, DNS outages, ISP failures, or a faulty extender unless the actual cause is a changing gateway MAC mapping.
+
+## Verify the problem first
+
+Open PowerShell and inspect the active adapter and gateway:
+
+```powershell
+Get-NetIPConfiguration
+Get-NetRoute -DestinationPrefix "0.0.0.0/0"
+Get-NetNeighbor -IPAddress 192.168.1.1
+tracert -d 8.8.8.8
+```
+
+Replace `192.168.1.1` with the gateway shown by `Get-NetRoute`. If the same gateway IP is associated with multiple MAC addresses, confirm which MAC belongs to the trusted upstream router before using this app. Do not guess the MAC address.
+
+In the original incident that motivated this project:
+
+- Gateway IP: `192.168.1.1`
+- Trusted FiberHome LAN MAC: `90-55-DE-42-83-40`
+- Conflicting MAC observed on the LAN: `2C-B6-C2-36-AF-EA`
+
+## Use the app
+
+1. Select the physical Wi-Fi or Ethernet adapter connected to the affected network.
+2. Enter the gateway IPv4 address.
+3. Enter the verified gateway MAC address.
+4. Click **Pin MAC**.
+5. Confirm the status says the mapping is **Permanent**.
+
+The adapter list is populated from Windows `Get-NetAdapter` metadata and excludes virtual and filter adapters such as Npcap, WAN Miniport, Tailscale, QoS, and WFP interfaces. The dropdown shows the exact Windows adapter alias, for example `Wi-Fi 2 (Up)`. `Wi-Fi 2` is already the complete alias used by `netsh`; shortening it to `Wi-Fi` would not be reliable.
+
+When the correct permanent mapping already exists, **Pin MAC** is disabled. **Release** removes the entry and lets Windows learn the gateway dynamically again.
+
+The app performs the equivalent of the following commands. Replace the example interface, gateway, and MAC with values from your own network:
 
 ```powershell
 Remove-NetNeighbor -InterfaceAlias "Wi-Fi 2" -IPAddress 192.168.1.1 -Confirm:$false -ErrorAction SilentlyContinue
 New-NetNeighbor -InterfaceAlias "Wi-Fi 2" -IPAddress 192.168.1.1 -LinkLayerAddress "90-55-DE-42-83-40" -State Permanent
 ```
 
-The interface dropdown is filtered using Windows `Get-NetAdapter` metadata so it lists physical Ethernet and Wi-Fi adapters while excluding virtual and filter adapters such as Npcap, WAN Miniport, Tailscale, QoS, and WFP interfaces. The displayed name is the exact Windows interface alias. For example, `Wi-Fi 2` is already the complete alias used by `netsh`; a shortened prefix such as `Wi-Fi` would not be reliable.
+## Release before changing networks
 
-The app checks the current neighbor entry when it opens. It reports whether the gateway mapping is permanent, dynamic, or absent. **Pin MAC** is disabled when the selected gateway is already permanently mapped to the configured MAC.
-
-## When to use it
-
-Use it only after verifying the gateway IP and trusted gateway MAC. A typical investigation uses:
-
-```powershell
-Get-NetNeighbor -IPAddress 192.168.1.1
-Get-NetRoute -DestinationPrefix "0.0.0.0/0"
-tracert -d 8.8.8.8
-```
-
-If the gateway IP is claimed by more than one MAC address, confirm which MAC belongs to the real upstream router before pinning it. In the original case, the trusted FiberHome LAN MAC was `90-55-DE-42-83-40` and the conflicting device was `2C-B6-C2-36-AF-EA`.
-
-The pin is specific to one local adapter and gateway IP. It does not change the router, DHCP, Wi-Fi password, extender configuration, or other users' devices.
-
-## Release the pin
-
-Release the entry before using a different network if that network may use the same gateway address:
+The mapping is tied to the selected adapter and IP address. Release it before using a public network, another dorm network, or a different router that may also use `192.168.1.1`:
 
 ```powershell
 Remove-NetNeighbor -InterfaceAlias "Wi-Fi 2" -IPAddress 192.168.1.1 -Confirm:$false
 ```
 
-The app's **Release** button runs the same operation. A permanent mapping can become wrong after moving to a public Wi-Fi network, changing routers, resetting an adapter, or changing the gateway address.
+The app's **Release** button runs the same command. A permanent mapping can become wrong after moving to another network, changing routers, resetting an adapter, or changing the gateway address.
+
+## Proper network-side fix
+
+The network administrator should find the second device claiming the gateway IP and correct its configuration. A secondary router usually needs a unique management IP and either access-point/bridge mode with DHCP disabled or a separate routed subnet. Changing the main gateway address without understanding the network can disconnect other users.
 
 ## Limitations and safety
 
@@ -61,9 +86,9 @@ The app's **Release** button runs the same operation. A permanent mapping can be
 - Ethernet works the same way as Wi-Fi if it has the same duplicate-gateway problem; select the physical Ethernet adapter.
 - This tool does not hide traffic, bypass network access controls, or fix weak Wi-Fi signal.
 
-## Build
+## Build from source
 
-Requirements: Windows 10/11 and the .NET 9 SDK.
+Requirements: Windows 10 or 11 and the .NET 9 SDK.
 
 ```powershell
 dotnet build -c Release
@@ -73,12 +98,12 @@ dotnet publish -c Release -r win-x64 --self-contained true `
   -p:EnableCompressionInSingleFile=true
 ```
 
-Run the published executable as administrator. The project is intentionally small and uses WinForms, `netsh`, and the built-in PowerShell `Get-NetAdapter` cmdlet; it has no third-party runtime dependency.
+The project uses WinForms, `netsh`, and the built-in PowerShell `Get-NetAdapter` cmdlet. It has no third-party runtime dependency.
 
-## Search terms
+## Related searches
 
-Windows ARP conflict, duplicate gateway IP, ARP flapping, changing gateway MAC, static ARP entry, permanent neighbor entry, MAC address pinning, Wi-Fi extender disconnects, range extender packet loss, dorm Wi-Fi gaming disconnects, intermittent Internet stalls, Windows netsh neighbor, PowerShell Get-NetNeighbor, gateway MAC fix.
+Windows ARP conflict, duplicate gateway IP, ARP flapping, changing gateway MAC, permanent ARP entry, static neighbor entry, MAC address pinning, Wi-Fi extender disconnects, range extender packet loss, dorm Wi-Fi gaming disconnects, intermittent Internet stalls, Windows `netsh` neighbor, PowerShell `Get-NetNeighbor`, gateway MAC fix.
 
 ## License
 
-Add a license before publishing the repository. MIT is a reasonable choice for a small utility if you want others to reuse and modify it.
+Copyright (c) 2026 ventriquo. Released under the [MIT License](LICENSE).
